@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1b1e28">
+<title>Ultimate Tic-Tac-Toe</title>
+<style>
+  :root {
+    --bg: #1b1e28;
+    --panel: #252a37;
+    --cell: #2f3545;
+    --cell-hover: #3a4257;
+    --line: #4a5268;
+    --text: #e8ebf2;
+    --muted: #9aa3b8;
+    --x: #ff6b6b;
+    --o: #4dabf7;
+    --active: #ffd43b;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px;
+    padding-top: max(16px, env(safe-area-inset-top));
+    user-select: none;
+  }
+  h1 { font-size: 1.4rem; margin: 4px 0 8px; letter-spacing: .02em; }
+  #status {
+    min-height: 2em;
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+  .x, .cell.x { color: var(--x); }
+  .o, .cell.o { color: var(--o); }
+
+  #board {
+    --size: min(94vw, calc(100vh - 210px), 600px);
+    width: var(--size);
+    height: var(--size);
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    gap: calc(var(--size) * 0.02);
+    background: var(--line);
+    padding: calc(var(--size) * 0.02);
+    border-radius: 12px;
+  }
+  .small {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    gap: 3px;
+    background: var(--panel);
+    padding: 4px;
+    border-radius: 8px;
+    outline: 3px solid transparent;
+    transition: opacity .15s;
+  }
+  .small.active { outline-color: var(--active); }
+  .small.inactive { opacity: .45; }
+  .cell {
+    border: none;
+    padding: 0;
+    background: var(--cell);
+    border-radius: 4px;
+    font: inherit;
+    font-weight: 800;
+    font-size: calc(var(--size) * 0.06);
+    min-width: 0; min-height: 0; overflow: hidden;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: default;
+    color: var(--text);
+  }
+  .cell.playable { cursor: pointer; }
+  .cell.playable:hover { background: var(--cell-hover); }
+  .cell.last { box-shadow: inset 0 0 0 2px var(--active); }
+  .winner {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 900;
+    font-size: calc(var(--size) * 0.26);
+    background: rgba(27, 30, 40, .78);
+    border-radius: 8px;
+    pointer-events: none;
+  }
+  .winner[hidden] { display: none; }
+  .winner.draw { color: var(--muted); font-size: calc(var(--size) * 0.12); }
+
+  #controls { margin-top: 14px; display: flex; gap: 10px; }
+  button.btn {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  button.btn:hover { background: var(--cell-hover); }
+  button.btn:disabled { opacity: .4; cursor: default; }
+  details { max-width: 600px; margin-top: 14px; color: var(--muted); font-size: .9rem; }
+  summary { cursor: pointer; }
+</style>
+</head>
+<body>
+  <h1>Ultimate Tic-Tac-Toe</h1>
+  <div id="status"></div>
+  <div id="board"></div>
+  <div id="controls">
+    <button class="btn" id="undo">Undo</button>
+    <button class="btn" id="reset">New game</button>
+  </div>
+  <details>
+    <summary>How to play</summary>
+    <p>Players take turns placing X and O. The square you pick inside a small board
+    decides which small board your opponent must play in next (highlighted in yellow).
+    Win a small board by getting three in a row inside it. Win the game by winning three
+    small boards in a row. If you're sent to a board that is already won or full,
+    you may play in any open board.</p>
+  </details>
+
+<script>
+const LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+const STORAGE_KEY = 'uttt-state-v1';
+
+let state;
+
+function newState() {
+  return {
+    cells: Array.from({ length: 9 }, () => Array(9).fill(null)), // cells[board][square]
+    boardWinners: Array(9).fill(null), // 'X' | 'O' | 'D' (draw) | null
+    player: 'X',
+    nextBoard: null, // null = any board
+    winner: null,    // 'X' | 'O' | 'D' | null
+    history: [],     // [{board, square}]
+  };
+}
+
+function lineWinner(arr) {
+  for (const [a, b, c] of LINES) {
+    if (arr[a] && arr[a] !== 'D' && arr[a] === arr[b] && arr[a] === arr[c]) return arr[a];
+  }
+  return null;
+}
+
+function evalSmall(b) {
+  const w = lineWinner(state.cells[b]);
+  if (w) return w;
+  return state.cells[b].every(Boolean) ? 'D' : null;
+}
+
+function evalBig() {
+  const w = lineWinner(state.boardWinners);
+  if (w) return w;
+  return state.boardWinners.every(Boolean) ? 'D' : null;
+}
+
+function isPlayable(b, s) {
+  if (state.winner) return false;
+  if (state.boardWinners[b]) return false;
+  if (state.cells[b][s]) return false;
+  return state.nextBoard === null || state.nextBoard === b;
+}
+
+function play(b, s) {
+  if (!isPlayable(b, s)) return;
+  state.cells[b][s] = state.player;
+  state.history.push({ board: b, square: s });
+  recompute();
+  save();
+  render();
+}
+
+// Rebuild derived state (winners, next board, current player) from history.
+function recompute() {
+  const moves = state.history;
+  state.cells = Array.from({ length: 9 }, () => Array(9).fill(null));
+  state.boardWinners = Array(9).fill(null);
+  state.winner = null;
+  state.nextBoard = null;
+  moves.forEach((m, i) => {
+    state.cells[m.board][m.square] = i % 2 === 0 ? 'X' : 'O';
+    state.boardWinners[m.board] = evalSmall(m.board);
+  });
+  state.player = moves.length % 2 === 0 ? 'X' : 'O';
+  state.winner = evalBig();
+  if (moves.length) {
+    const target = moves[moves.length - 1].square;
+    state.nextBoard = state.boardWinners[target] ? null : target;
+  }
+}
+
+function undo() {
+  if (!state.history.length) return;
+  state.history.pop();
+  recompute();
+  save();
+  render();
+}
+
+function reset() {
+  if (state.history.length && !state.winner && !confirm('Start a new game?')) return;
+  state = newState();
+  save();
+  render();
+}
+
+function save() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.history)); } catch (e) {}
+}
+
+function load() {
+  state = newState();
+  try {
+    const h = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    if (Array.isArray(h)) { state.history = h; recompute(); }
+  } catch (e) { state = newState(); }
+}
+
+const boardEl = document.getElementById('board');
+const statusEl = document.getElementById('status');
+
+function buildBoard() {
+  for (let b = 0; b < 9; b++) {
+    const small = document.createElement('div');
+    small.className = 'small';
+    small.dataset.board = b;
+    for (let s = 0; s < 9; s++) {
+      const cell = document.createElement('button');
+      cell.className = 'cell';
+      cell.dataset.board = b;
+      cell.dataset.square = s;
+      cell.setAttribute('aria-label', `Board ${b + 1}, square ${s + 1}`);
+      small.appendChild(cell);
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'winner';
+    overlay.hidden = true;
+    small.appendChild(overlay);
+    boardEl.appendChild(small);
+  }
+  boardEl.addEventListener('click', (e) => {
+    const cell = e.target.closest('.cell');
+    if (cell) play(+cell.dataset.board, +cell.dataset.square);
+  });
+}
+
+function render() {
+  const last = state.history[state.history.length - 1];
+  boardEl.querySelectorAll('.small').forEach((small) => {
+    const b = +small.dataset.board;
+    const bw = state.boardWinners[b];
+    const active = !state.winner && !bw && (state.nextBoard === null || state.nextBoard === b);
+    small.classList.toggle('active', active && state.nextBoard !== null);
+    small.classList.toggle('inactive', !active && !bw && !state.winner);
+
+    small.querySelectorAll('.cell').forEach((cell) => {
+      const s = +cell.dataset.square;
+      const v = state.cells[b][s];
+      cell.textContent = v || '';
+      cell.className = 'cell' + (v ? ' ' + v.toLowerCase() : '');
+      if (isPlayable(b, s)) cell.classList.add('playable');
+      if (last && last.board === b && last.square === s) cell.classList.add('last');
+    });
+
+    const overlay = small.querySelector('.winner');
+    if (bw) {
+      overlay.hidden = false;
+      overlay.textContent = bw === 'D' ? 'Draw' : bw;
+      overlay.className = 'winner ' + (bw === 'D' ? 'draw' : bw.toLowerCase());
+    } else {
+      overlay.hidden = true;
+    }
+  });
+
+  if (state.winner === 'D') {
+    statusEl.innerHTML = "It's a draw!";
+  } else if (state.winner) {
+    statusEl.innerHTML = `<span class="${state.winner.toLowerCase()}">${state.winner}</span> wins the game! 🎉`;
+  } else {
+    const p = `<span class="${state.player.toLowerCase()}">${state.player}</span>`;
+    statusEl.innerHTML = state.nextBoard === null
+      ? `${p} to move — play in any open board`
+      : `${p} to move — play in the highlighted board`;
+  }
+  document.getElementById('undo').disabled = !state.history.length;
+}
+
+document.getElementById('undo').addEventListener('click', undo);
+document.getElementById('reset').addEventListener('click', reset);
+
+buildBoard();
+load();
+render();
+</script>
+</body>
+</html>
